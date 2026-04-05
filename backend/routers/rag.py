@@ -4,6 +4,7 @@ Based on app2.py (PDF RAG Chatbot feature).
 """
 import os
 import sys
+import gc
 import shutil
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
@@ -59,7 +60,7 @@ def _get_embeddings():
     if _embeddings is None:
         if not RAG_AVAILABLE:
             return None
-        _embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+        _embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5", threads=1)
     return _embeddings
 
 
@@ -125,6 +126,8 @@ async def upload_pdf(file: UploadFile = File(...)):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        gc.collect()
 
 
 class AskRequest(BaseModel):
@@ -145,6 +148,8 @@ def ask_question(req: AskRequest):
         return {"answer": answer, "filename": _rag_state["filename"]}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        gc.collect()
 
 
 @router.delete("/clear")

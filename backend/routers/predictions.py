@@ -3,6 +3,7 @@ Predictions Router — XGBoost 4-model forecast pipeline.
 """
 import os
 import sys
+import gc
 import numpy as np
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -73,6 +74,8 @@ def run_pred(req: PredictRequest):
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        gc.collect()
 
 
 @router.get("/results")
