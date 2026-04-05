@@ -1,0 +1,472 @@
+
+# ----------------- USER CONFIG (from previous cells) -----------------
+DATA_PATH = "/content/household_power_consumption_with_tariff.csv"  # <-- change to your file path in Colab
+
+# ----------------- 1. Load CSV -----------------
+print("Loading:", DATA_PATH)
+df = pd.read_csv(DATA_PATH, low_memory=False)
+print("Initial shape:", df.shape)
+
+# ----------------- 2. Robust numeric extractor -----------------
+float_pattern = re.compile(r'[-+]?\d*\.\d+|\d+')
+
+def extract_mean_floats(s):
+    """Return a float from s. If s contains multiple numbers, return their mean."""
+    if s is None:
+        return np.nan
+    if isinstance(s, (int, float, np.number)):
+        return float(s)
+    s_str = str(s).strip()
+    # try direct conversion
+    try:
+        return float(s_str)
+    except:
+        pass
+    # extract numeric substrings
+    matches = float_pattern.findall(s_str)
+    if not matches:
+        return np.nan
+    vals = [float(m) for m in matches]
+    return float(np.mean(vals))
+
+expected_numeric = [
+    'Global_active_power', 'Global_reactive_power', 'Global_intensity',
+    'Voltage', 'Tariff_Rate', 'Sub_metering_1', 'Sub_metering_2', 'Sub_metering_3'
+]
+
+for col in expected_numeric:
+    if col in df.columns:
+        print(f"Cleaning column: {col}")
+        df[col] = df[col].apply(extract_mean_floats).astype(float)
+    else:
+        print(f"Column {col} not present; skipping.")
+
+# ----------------- 3. Parse datetime safely -----------------
+def safe_parse_datetime(row):
+    sdate = str(row.get('Date','')).strip()
+    stime = str(row.get('Time','')).strip()
+    for fmt in ("%d-%m-%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S"):
+        try:
+            return datetime.strptime(f"{sdate} {stime}", fmt)
+        except:
+            pass
+    try:
+        return pd.to_datetime(sdate + " " + stime, dayfirst=True, errors='coerce')
+    except:
+        return pd.NaT
+
+df['datetime'] = df.apply(safe_parse_datetime, axis=1)
+df = df.dropna(subset=['datetime']).reset_index(drop=True)
+df = df.sort_values('datetime').reset_index(drop=True)
+print("After datetime parse rows:", len(df))
+
+# ----------------- 4. Infer sampling interval (minutes) -----------------
+diffs = df['datetime'].diff().dt.total_seconds().dropna()
+if len(diffs) > 0:
+    median_seconds = diffs.median()
+    interval_min = median_seconds / 60.0
+else:
+    interval_min = 1.0
+print(f"Inferred sampling interval: {interval_min:.2f} minutes")
+
+# ----------------- 5. Compute per-record energy (kWh) -----------------
+if 'Global_active_power' not in df.columns:
+    raise SystemExit("Global_active_power missing.")
+df['energy_kwh'] = df['Global_active_power'] * (interval_min / 60.0)
+
+print("Data loaded and initial cleaning complete.")
+
+# ----------------- 6. Define Daily Time Slots and Rates & Calculate Per-Record TOU Cost -----------------
+
+# Define the new daily time slots and their rates
+daily_tariff_map = {
+    (22, 6): {
+      'slot': 'Night_Off_Peak',
+      'rate': 3.75
+      }, # 10 PM - 6 AM
+    (6, 12): {
+      'slot': 'Morning_Peak',
+      'rate': 5.50
+      },   # 6 AM - 12 PM
+    (12, 18): {
+      'slot': 'Forenoon_Normal',
+      'rate': 4.75
+      }, # 12 PM - 6 PM
+    (18, 22): {
+      'slot': 'Evening_Peak',
+      'rate': 6.50
+      }    # 6 PM - 10 PM
+}
+
+def get_daily_tariff(hour):
+    for (start_hour, end_hour), tariff_info in daily_tariff_map.items():
+        if start_hour < end_hour:
+            if start_hour <= hour < end_hour:
+                return tariff_info
+        else: # Handles overnight slots like 22-6
+            if hour >= start_hour or hour < end_hour:
+                return tariff_info
+    return {'slot': 'Unknown', 'rate': 0.0} # Fallback
+
+# Apply the function to create new Tariff_Time_Slot and Tariff_Rate columns
+df['Time_Hour'] = df['datetime'].dt.hour
+
+# Use .loc to avoid SettingWithCopyWarning
+df.loc[:, 'Tariff_Time_Slot_Daily'] = df['Time_Hour'].apply(lambda x: get_daily_tariff(x)['slot'])
+df.loc[:, 'Tariff_Rate_Daily'] = df['Time_Hour'].apply(lambda x: get_daily_tariff(x)['rate'])
+
+# Calculate per-record TOU cost using the new daily tariff rates
+df.loc[:, 'cost_tou'] = df['energy_kwh'] * df['Tariff_Rate_Daily']
+
+print("Daily time slots, rates, and per-record TOU cost calculated.")
+print(df[['datetime', 'Time_Hour', 'Tariff_Time_Slot_Daily', 'Tariff_Rate_Daily', 'energy_kwh', 'cost_tou']].head())
+# ----------------- 7. Aggregate Data to Daily Level -----------------
+
+df['date'] = df['datetime'].dt.to_period('D').dt.start_time
+
+agg_funcs = {
+    'energy_kwh': 'sum',    # total energy per day (kWh)
+    'cost_tou': 'sum',      # TOU-based daily bill (₹)
+    'Global_active_power': 'mean'
+}
+for c in ['Voltage','Global_reactive_power','Global_intensity','Sub_metering_1','Sub_metering_2','Sub_metering_3']:
+    if c in df.columns:
+        agg_funcs[c] = 'sum' if c.startswith('Sub_metering') else 'mean'
+
+daily = df.groupby('date').agg(agg_funcs).reset_index().rename(
+    columns={'energy_kwh':'daily_energy_kwh','cost_tou':'daily_bill_tou'}
+)
+
+daily['records_count'] = df.groupby('date')['energy_kwh'].count().values
+daily['day_of_week'] = daily['date'].dt.dayofweek # Monday=0, Sunday=6
+daily['day_of_year_sin'] = np.sin(2 * np.pi * daily['date'].dt.dayofyear / 365)
+daily['day_of_year_cos'] = np.cos(2 * np.pi * daily['date'].dt.dayofyear / 365)
+daily['month'] = daily['date'].dt.month
+daily['year'] = daily['date'].dt.year
+
+# festival presence flag (if present in original df)
+if 'Festival' in df.columns:
+    def fest_flag_daily(x):
+        s = x.dropna().astype(str).str.strip().str.lower()
+        if len(s)==0: return 0
+        for val in s:
+            if val not in ['none','nan','', 'na']:
+                return 1
+        return 0
+    daily['festival_flag'] = df.groupby('date')['Festival'].apply(fest_flag_daily).values
+else:
+    daily['festival_flag'] = 0
+
+# categorical modes per day (if present)
+for col in ['Season','DayOfWeek','Tariff_Time_Slot_Daily']:
+    if col in df.columns:
+        daily[col + '_mode'] = df.groupby('date')[col].agg(
+            lambda x: x.dropna().astype(str).mode().iloc[0] if len(x.dropna())>0 else 'NA'
+        ).values
+
+# ----------------- 8. Adjust Slab Billing for Daily Consumption -----------------
+# Adapted from monthly slabs by dividing thresholds by ~30 days/month
+slabs_india_daily = [
+    (3.3, 4.50),     # 0–3.3 units/day (originally 0-100/month)
+    (6.6, 5.50),     # 3.4–6.6 units/day (originally 101-200/month)
+    (13.3, 7.00),    # 6.7–13.3 units/day (originally 201-400/month)
+    (None, 8.50)     # >13.3 units/day (originally >400/month)
+]
+
+# Function for computing slab charge (re-used from weekly aggregation)
+def compute_slab_charge(total_units, slabs):
+    remaining = total_units
+    prev_limit = 0.0
+    charge = 0.0
+    for limit, rate in slabs:
+        if limit is None:
+            charge += remaining * rate
+            remaining = 0.0
+            break
+        slab_width = limit - prev_limit
+        used = min(remaining, slab_width)
+        charge += used * rate
+        remaining -= used
+        prev_limit = limit
+        if remaining <= 0:
+            break
+    if remaining > 0:
+        last_rate = slabs[-1][1]
+        charge += remaining * last_rate
+    return float(charge)
+
+# Function for computing final slab bill (re-used from weekly aggregation)
+def compute_final_slab_bill(total_units, slabs, fixed_charge=0.0, duty_pct=0.0, surcharge_pct=0.0, min_bill=None):
+    energy_charge = compute_slab_charge(total_units, slabs)
+    subtotal = energy_charge + fixed_charge
+    duty = subtotal * (duty_pct / 100.0)
+    surcharge = subtotal * (surcharge_pct / 100.0)
+    total = subtotal + duty + surcharge
+    if min_bill is not None:
+        total = max(total, min_bill)
+    return {
+        'total_kwh': float(total_units),
+        'energy_charge': energy_charge,
+        'fixed_charge': fixed_charge,
+        'duty': duty,
+        'surcharge': surcharge,
+        'final_bill': float(total)
+    }
+
+daily['daily_bill_slab'] = daily['daily_energy_kwh'].apply(
+    lambda u: compute_final_slab_bill(u, slabs=slabs_india_daily, fixed_charge=0.0, duty_pct=0.0, surcharge_pct=0.0)['final_bill']
+)
+
+print("Daily aggregation and daily slab billing complete.")
+print("Daily rows:", len(daily))
+display(daily.head())
+# ----------------- 9. Generate Advanced Daily Features -----------------
+print("Generating daily lag features...")
+# Lag features for daily_energy_kwh
+for i in range(1, 4): # Lag 1, 2, 3 days
+    daily[f'daily_energy_kwh_lag{i}'] = daily['daily_energy_kwh'].shift(i).fillna(0)
+
+print("Generating daily rolling statistics...")
+rolling_cols_daily = [
+    'Global_active_power', 'Global_reactive_power', 'Voltage', 'Global_intensity',
+    'Sub_metering_1', 'Sub_metering_2', 'Sub_metering_3'
+]
+window_size_daily = 3 # 3-day rolling window
+
+for col in rolling_cols_daily:
+    if col in daily.columns:
+        daily[f'{col}_rollmean{window_size_daily}'] = daily[col].rolling(window=window_size_daily, min_periods=1).mean().fillna(0)
+        daily[f'{col}_rollstd{window_size_daily}'] = daily[col].rolling(window=window_size_daily, min_periods=1).std().fillna(0)
+    else:
+        print(f"Warning: Rolling stat column {col} not found in daily data; skipping.")
+
+print("Daily advanced feature generation complete.")
+# Save aggregated daily with advanced features for inspection
+daily.to_csv('/content/daily_aggregated_with_advanced_features.csv', index=False)
+print("Saved daily_aggregated_with_advanced_features.csv; rows:", len(daily))
+display(daily.head())
+
+
+# ----------------- USER CONFIG (for daily aggregation) -----------------
+TRAIN_DAYS = 150 # Number of days for training
+PRED_DAYS = 30   # Number of days for prediction
+RANDOM_STATE = 42 # Random state for reproducibility
+
+# Best parameters found during previous tuning step
+# Household Units
+household_units_best_params = {'colsample_bytree': 0.7, 'learning_rate': 0.1, 'max_depth': 3, 'n_estimators': 200, 'subsample': 0.8}
+# Household Slab-Bill
+household_bill_best_params = {'colsample_bytree': 0.7, 'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 200, 'subsample': 0.7}
+# Industrial Units
+industrial_units_best_params = {'colsample_bytree': 0.8, 'learning_rate': 0.1, 'max_depth': 3, 'n_estimators': 100, 'subsample': 0.7}
+# Industrial TOU-Bill
+industrial_bill_best_params = {'colsample_bytree': 0.8, 'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 100, 'subsample': 0.7}
+
+# ----------------- 10. Prepare Data for Modeling and Train/Test Split (Daily) -----------------
+
+# Feature sets (only use available columns)
+# Updated features to include lag and rolling stats, and daily seasonal features
+cand_house = [
+    'Global_active_power','Global_reactive_power','Voltage',
+    'Sub_metering_1','Sub_metering_2','Sub_metering_3','records_count',
+    'day_of_year_sin','day_of_year_cos','day_of_week','month','year','festival_flag',
+    'daily_energy_kwh_lag1', 'daily_energy_kwh_lag2', 'daily_energy_kwh_lag3'
+]
+rolling_cols_daily_for_features = [
+    'Global_active_power', 'Global_reactive_power', 'Voltage', 'Global_intensity',
+    'Sub_metering_1', 'Sub_metering_2', 'Sub_metering_3'
+]
+window_size_daily = 3
+cand_house.extend([f'{c}_rollmean{window_size_daily}' for c in rolling_cols_daily_for_features if c in daily.columns])
+cand_house.extend([f'{c}_rollstd{window_size_daily}' for c in rolling_cols_daily_for_features if c in daily.columns])
+household_feats = list(dict.fromkeys([c for c in cand_house if c in daily.columns])) # Use dict.fromkeys to preserve order and remove duplicates
+
+household_cat = []
+for c in ['Season_mode','DayOfWeek_mode','Tariff_Time_Slot_Daily_mode']:
+    if c in daily.columns:
+        household_cat.append(c)
+        household_feats.append(c)
+
+cand_ind = [
+    'Global_active_power','Global_reactive_power','Global_intensity','Sub_metering_3','Voltage','records_count',
+    'day_of_year_sin','day_of_year_cos','day_of_week','month','year','festival_flag',
+    'daily_energy_kwh_lag1', 'daily_energy_kwh_lag2', 'daily_energy_kwh_lag3'
+]
+cand_ind.extend([f'{c}_rollmean{window_size_daily}' for c in rolling_cols_daily_for_features if c in daily.columns])
+cand_ind.extend([f'{c}_rollstd{window_size_daily}' for c in rolling_cols_daily_for_features if c in daily.columns])
+industrial_feats = list(dict.fromkeys([c for c in cand_ind if c in daily.columns])) # Use dict.fromkeys to preserve order and remove duplicates
+
+industrial_cat = []
+for c in ['Season_mode','Tariff_Time_Slot_Daily_mode','DayOfWeek_mode']:
+    if c in daily.columns:
+        industrial_cat.append(c)
+        industrial_feats.append(c)
+
+print("Household features:", household_feats)
+print("Industrial features:", industrial_feats)
+
+# Unique numeric cols and fillna (re-run as new features added)
+numeric_cols_final = list(dict.fromkeys(
+    [c for c in (household_feats + industrial_feats) if c in daily.columns and not c.endswith('_mode')]
+))
+
+daily[numeric_cols_final] = daily[numeric_cols_final].apply(pd.to_numeric, errors='coerce')
+daily[numeric_cols_final] = daily[numeric_cols_final].fillna(method='ffill').fillna(method='bfill').fillna(0)
+
+# Train/Test split (Daily)
+daily = daily.sort_values('date').reset_index(drop=True)
+if TRAIN_DAYS + PRED_DAYS > len(daily):
+    TRAIN_DAYS = int(len(daily) * 0.8)
+    PRED_DAYS = len(daily) - TRAIN_DAYS
+    if PRED_DAYS == 0 and len(daily) > 0:
+        TRAIN_DAYS = len(daily) - 1
+        PRED_DAYS = 1
+    elif PRED_DAYS == 0:
+        raise SystemExit("Insufficient data for training and prediction after aggregation.")
+    print(f"Adjusted splits: train={TRAIN_DAYS} days, pred={PRED_DAYS} days")
+
+train_df_daily = daily.iloc[:TRAIN_DAYS].copy()
+test_df_daily = daily.iloc[TRAIN_DAYS:TRAIN_DAYS+PRED_DAYS].copy()
+if len(test_df_daily) == 0:
+    raise SystemExit("Insufficient days for testing after split; reduce TRAIN_DAYS or provide longer data.")
+
+print("Train period:", train_df_daily['date'].min(), "to", train_df_daily['date'].max())
+print("Test period:", test_df_daily['date'].min(), "to", test_df_daily['date'].max())
+
+# Targets
+y_train_units_daily = train_df_daily['daily_energy_kwh'].values
+y_test_units_daily = test_df_daily['daily_energy_kwh'].values
+
+y_train_house_bill_daily = train_df_daily['daily_bill_slab'].values
+y_test_house_bill_daily = test_df_daily['daily_bill_slab'].values
+
+y_train_ind_bill_daily = train_df_daily['daily_bill_tou'].values
+y_test_ind_bill_daily = test_df_daily['daily_bill_tou'].values
+
+# ----------------- 11. Train and Evaluate XGBoost Models with Pre-defined Best Parameters (Daily) -----------------
+
+# Preprocessor & XGBoost helpers (re-defining for clarity in this block, but already present in kernel)
+def build_preprocessor(num_features, cat_features):
+    transformers = []
+    if len(num_features) > 0:
+        transformers.append(('num', StandardScaler(), num_features))
+    if len(cat_features) > 0:
+        transformers.append(('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), cat_features))
+    pre = ColumnTransformer(transformers=transformers, remainder='drop')
+    return pre
+
+def train_xgb(Xtr, ytr, Xte, params):
+    model = xgb.XGBRegressor(**params, objective='reg:squarederror')
+    model.fit(Xtr, ytr)
+    preds = model.predict(Xte)
+    return model, preds
+
+def mape_pct(y_true, y_pred):
+    return mean_absolute_percentage_error(y_true, y_pred) * 100.0
+
+# Household pipeline (Units + Slab Bill)
+house_num_daily = [c for c in household_feats if not c.endswith('_mode')]
+house_cat_daily = [c for c in household_feats if c.endswith('_mode')]
+
+pre_h_daily = build_preprocessor(house_num_daily, house_cat_daily)
+Xh_train_daily = pre_h_daily.fit_transform(train_df_daily)
+Xh_test_daily = pre_h_daily.transform(test_df_daily)
+
+print("\nTraining Household Units model (Daily)...")
+house_unit_model_daily, house_unit_pred_daily = train_xgb(Xh_train_daily, y_train_units_daily, Xh_test_daily, household_units_best_params)
+
+print("Training Household Bill model (slab target, Daily)...")
+house_bill_model_daily, house_bill_pred_daily = train_xgb(Xh_train_daily, y_train_house_bill_daily, Xh_test_daily, household_bill_best_params)
+
+house_units_mape_daily = mape_pct(y_test_units_daily, house_unit_pred_daily)
+house_bill_mape_daily = mape_pct(y_test_house_bill_daily, house_bill_pred_daily)
+print(f"Household Units MAPE (Daily): {house_units_mape_daily:.2f}%")
+print(f"Household Slab-Bill MAPE (Daily): {house_bill_mape_daily:.2f}%")
+
+# Industrial pipeline (Units + TOU Bill)
+ind_num_daily = [c for c in industrial_feats if not c.endswith('_mode')]
+ind_cat_daily = [c for c in industrial_feats if c.endswith('_mode')]
+
+pre_i_daily = build_preprocessor(ind_num_daily, ind_cat_daily)
+Xi_train_daily = pre_i_daily.fit_transform(train_df_daily)
+Xi_test_daily = pre_i_daily.transform(test_df_daily)
+
+print("\nTraining Industrial Units model (Daily)...")
+ind_unit_model_daily, ind_unit_pred_daily = train_xgb(Xi_train_daily, y_train_units_daily, Xi_test_daily, industrial_units_best_params)
+
+print("Training Industrial Bill model (TOU target, Daily)...")
+ind_bill_model_daily, ind_bill_pred_daily = train_xgb(Xi_train_daily, y_train_ind_bill_daily, Xi_test_daily, industrial_bill_best_params)
+
+ind_units_mape_daily = mape_pct(y_test_units_daily, ind_unit_pred_daily)
+ind_bill_mape_daily = mape_pct(y_test_ind_bill_daily, ind_bill_pred_daily)
+print(f"Industrial Units MAPE (Daily): {ind_units_mape_daily:.2f}%")
+print(f"Industrial TOU-Bill MAPE (Daily): {ind_bill_mape_daily:.2f}%")
+
+
+
+
+import matplotlib.pyplot as plt
+from google.colab import files
+
+pred_days = test_df_daily['date'].dt.strftime('%Y-%m-%d').tolist()
+
+# ----------------- 12. Generate Daily Prediction Plots for XGBoost -----------------
+
+# Household Units
+plt.figure(figsize=(12,6))
+plt.plot(pred_days, y_test_units_daily, marker='o', label='Actual Units', linewidth=2)
+plt.plot(pred_days, house_unit_pred_daily, marker='x', label='Predicted Units (Household XGBoost)', linewidth=2)
+plt.title('Household Daily Energy Consumption (Units) – Actual vs Predicted (XGBoost)', fontsize=14)
+plt.xlabel('Date'); plt.ylabel('Units (kWh)')
+plt.grid(True); plt.legend(); plt.xticks(rotation=45); plt.tight_layout(); plt.show()
+
+# Household Bill (Slab)
+plt.figure(figsize=(12,6))
+plt.plot(pred_days, y_test_house_bill_daily, marker='o', label='Actual Slab Bill', linewidth=2)
+plt.plot(pred_days, house_bill_pred_daily, marker='x', label='Predicted Slab Bill (Household XGBoost)', linewidth=2)
+plt.title('Household Daily Bill (Slab) – Actual vs Predicted (XGBoost)', fontsize=14)
+plt.xlabel('Date'); plt.ylabel('Bill (₹)')
+plt.grid(True); plt.legend(); plt.xticks(rotation=45); plt.tight_layout(); plt.show()
+
+# Industrial Units
+plt.figure(figsize=(12,6))
+plt.plot(pred_days, y_test_units_daily, marker='o', label='Actual Units', linewidth=2)
+plt.plot(pred_days, ind_unit_pred_daily, marker='d', label='Predicted Units (Industrial XGBoost)', linewidth=2)
+plt.title('Industrial Daily Energy Consumption (Units) – Actual vs Predicted (XGBoost)', fontsize=14)
+plt.xlabel('Date'); plt.ylabel('Units (kWh)')
+plt.grid(True); plt.legend(); plt.xticks(rotation=45); plt.tight_layout(); plt.show()
+
+# Industrial Bill (TOU)
+plt.figure(figsize=(12,6))
+plt.plot(pred_days, y_test_ind_bill_daily, marker='o', label='Actual TOU Bill', linewidth=2)
+plt.plot(pred_days, ind_bill_pred_daily, marker='d', label='Predicted TOU Bill (Industrial XGBoost)', linewidth=2)
+plt.title('Industrial Daily Bill (TOU) – Actual vs Predicted (XGBoost)', fontsize=14)
+plt.xlabel('Date'); plt.ylabel('Bill (₹)')
+plt.grid(True); plt.legend(); plt.xticks(rotation=45); plt.tight_layout(); plt.show()
+
+# ----------------- 13. Save Daily Predictions from XGBoost to CSVs -----------------
+
+house_out_daily = test_df_daily[['date']].copy()
+house_out_daily['actual_units_kwh'] = y_test_units_daily
+house_out_daily['predicted_units_kwh'] = house_unit_pred_daily
+house_out_daily['actual_slab_bill'] = y_test_house_bill_daily
+house_out_daily['predicted_slab_bill'] = house_bill_pred_daily
+house_out_daily['units_mape_percent'] = house_units_mape_daily
+house_out_daily['bill_mape_percent'] = house_bill_mape_daily
+
+ind_out_daily = test_df_daily[['date']].copy()
+ind_out_daily['actual_units_kwh'] = y_test_units_daily
+ind_out_daily['predicted_units_kwh'] = ind_unit_pred_daily
+ind_out_daily['actual_tou_bill'] = y_test_ind_bill_daily
+ind_out_daily['predicted_tou_bill'] = ind_bill_pred_daily
+ind_out_daily['units_mape_percent'] = ind_units_mape_daily
+ind_out_daily['bill_mape_percent'] = ind_bill_mape_daily
+
+house_csv_daily = '/content/household_predictions_daily_xgboost.csv'
+ind_csv_daily = '/content/industrial_predictions_daily_xgboost.csv'
+house_out_daily.to_csv(house_csv_daily, index=False)
+ind_out_daily.to_csv(ind_csv_daily, index=False)
+print("Saved:", house_csv_daily, ind_csv_daily)
+
+files.download(house_csv_daily)
+files.download(ind_csv_daily)

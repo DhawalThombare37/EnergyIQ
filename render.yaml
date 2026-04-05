@@ -1,0 +1,27 @@
+services:
+  # 1. FastAPI Backend (Docker)
+  - type: web
+    name: energyiq-backend
+    runtime: docker
+    dockerContext: .
+    dockerfilePath: Dockerfile.backend
+    plan: free
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false # You will set this in the Render Dashboard
+      - key: PORT
+        value: 8000
+
+  # 2. Vite Frontend (Static Site)
+  - type: static
+    name: energyiq-frontend
+    buildCommand: npm run build
+    publishPath: dist
+    plan: free
+    envVars:
+      - key: VITE_API_BASE_URL
+        fromService:
+          name: energyiq-backend
+          type: web
+          property: host
+    rootDir: frontend

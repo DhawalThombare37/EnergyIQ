@@ -1,0 +1,48 @@
+# Stage 1: Build stage
+FROM python:3.10-slim AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential
+
+COPY requirements.txt ./root_requirements.txt
+COPY backend/requirements.txt ./backend_requirements.txt
+
+# Create a combined requirements and install to a local directory
+RUN pip install --no-cache-dir --upgrade pip && \
+    cat root_requirements.txt backend_requirements.txt > combined_requirements.txt && \
+    pip install --no-cache-dir --user --default-timeout=1000 -r combined_requirements.txt && \
+    find /root/.local -name "__pycache__" -exec rm -rf {} + && \
+    find /root/.local -name "*.pyc" -delete && \
+    find /root/.local -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true && \
+    find /root/.local -type d -name "testing" -exec rm -rf {} + 2>/dev/null || true && \
+    find /root/.local -name "*.so" -exec strip -s {} + 2>/dev/null || true && \
+    rm -rf /root/.local/lib/python3.10/site-packages/nvidia* && \
+    rm -rf /root/.local/lib/python3.10/site-packages/sympy* && \
+    rm -rf /root/.local/lib/python3.10/site-packages/sqlalchemy*
+
+# Stage 2: Final runtime stage
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Copy only the installed packages from the builder stage
+# (Standard location for --user is /root/.local)
+COPY --from=builder /root/.local /root/.local
+
+# Clean out the base python standard libraries from testing files, and any pycaches
+RUN find /usr/local/lib/python3.10 -type d \( -name "test" -o -name "tests" -o -name "idle_test" \) -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local/lib/python3.10 -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local/lib/python3.10 -name "*.pyc" -delete 2>/dev/null || true
+
+# Copy application source code
+COPY . .
+
+# Ensure the installed packages are in the Python path
+ENV PATH=/root/.local/bin:$PATH
+
+EXPOSE 8000
+
+# Run FastAPI backend
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

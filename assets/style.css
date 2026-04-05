@@ -1,0 +1,399 @@
+/* ══════════════════════════════════════════════
+   EnergyIQ — Premium Dark Theme
+   High-contrast, WCAG-AA compliant
+   ══════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  --bg: #080c18;
+  --bg-card: rgba(255, 255, 255, 0.06);
+  --bg-hover: rgba(255, 255, 255, 0.10);
+  --border: rgba(255, 255, 255, 0.10);
+  --cyan: #00d4ff;
+  --purple: #9b59fb;
+  --green: #10b981;
+  --amber: #f59e0b;
+  --red: #ef4444;
+  --text: #f0f4f8;
+  --text-muted: #cbd5e1;
+  --radius: 14px;
+}
+
+html,
+body,
+[data-testid="stAppViewContainer"] {
+  background: linear-gradient(135deg, #080c18 0%, #0d1229 50%, #0a0f1e 100%) !important;
+  font-family: 'Inter', sans-serif !important;
+  color: var(--text) !important;
+}
+
+[data-testid="stHeader"] {
+  background: transparent !important;
+}
+
+/* ── Sidebar */
+[data-testid="stSidebar"] {
+  background: rgba(8, 12, 24, 0.97) !important;
+  border-right: 1px solid var(--border) !important;
+}
+
+[data-testid="stSidebar"] * {
+  color: var(--text) !important;
+}
+
+[data-testid="stSidebar"] .stRadio label {
+  font-size: 0.88rem !important;
+  padding: 4px 0 !important;
+  color: var(--text-muted) !important;
+}
+
+[data-testid="stSidebar"] .stRadio label:hover {
+  color: var(--cyan) !important;
+}
+
+/* ── KPI Cards */
+.kpi-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.2rem 1.4rem;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s, border-color 0.2s;
+  margin-bottom: 0.5rem;
+}
+
+.kpi-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(0, 212, 255, 0.4);
+}
+
+.kpi-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+}
+
+.kpi-value {
+  font-size: 1.85rem;
+  font-weight: 800;
+  color: var(--cyan);
+  line-height: 1.1;
+}
+
+.kpi-sub {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.kpi-icon {
+  font-size: 1.5rem;
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  opacity: 0.5;
+}
+
+/* ── Page Titles */
+.page-title {
+  font-size: 1.9rem;
+  font-weight: 800;
+  color: var(--text);
+  margin-bottom: 0.2rem;
+}
+
+.grad-text {
+  background: linear-gradient(90deg, var(--cyan), var(--purple));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.page-subtitle {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+}
+
+/* ── Section card */
+.section-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.2rem 1.4rem;
+  margin-bottom: 1rem;
+}
+
+/* ── Stat rows */
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.875rem;
+}
+
+.stat-row:last-child {
+  border-bottom: none;
+}
+
+.stat-label {
+  color: var(--text-muted);
+}
+
+.stat-value {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ── Recommendation cards */
+.rec-card {
+  background: var(--bg-card);
+  border-left: 4px solid var(--cyan);
+  border-radius: var(--radius);
+  padding: 1rem 1.2rem;
+  margin-bottom: 0.8rem;
+  transition: background 0.2s;
+}
+
+.rec-card:hover {
+  background: var(--bg-hover);
+}
+
+.rec-card.HIGH {
+  border-left-color: var(--red);
+}
+
+.rec-card.MEDIUM {
+  border-left-color: var(--amber);
+}
+
+.rec-card.LOW {
+  border-left-color: var(--green);
+}
+
+.rec-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.3rem;
+}
+
+.rec-detail {
+  font-size: 0.83rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 2px 9px;
+  margin-top: 0.4rem;
+  margin-right: 0.4rem;
+}
+
+.badge-HIGH {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.badge-MEDIUM {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.badge-LOW {
+  background: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+/* ── Chat */
+.chat-messages {
+  max-height: 500px;
+  overflow-y: auto;
+  padding-right: 4px;
+  margin-bottom: 0.75rem;
+}
+
+.chat-bubble-user {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.18), rgba(123, 47, 247, 0.18));
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  border-radius: 14px 14px 4px 14px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.88rem;
+  color: var(--text);
+  max-width: 82%;
+  margin-left: auto;
+}
+
+.chat-bubble-ai {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px 14px 14px 4px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.88rem;
+  color: var(--text);
+  max-width: 82%;
+}
+
+.chat-role {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ── Buttons */
+.stButton>button {
+  background: linear-gradient(135deg, #00d4ff, #9b59fb) !important;
+  color: #000000 !important;
+  font-weight: 700 !important;
+  border-radius: 10px !important;
+  border: none !important;
+  transition: opacity 0.2s, transform 0.15s !important;
+}
+
+.stButton>button:hover {
+  opacity: 0.87 !important;
+  transform: translateY(-1px) !important;
+}
+
+/* ── Streamlit widget text — force readable */
+.stSelectbox label,
+.stTextInput label,
+.stSlider label,
+.stNumberInput label,
+.stCheckbox label,
+.stRadio label,
+.stTextArea label,
+.stFileUploader label,
+.stMultiSelect label,
+.stTabs [data-baseweb="tab"] {
+  color: var(--text) !important;
+  font-family: 'Inter', sans-serif !important;
+}
+
+.stSelectbox>div>div,
+.stTextInput>div>div>input,
+.stTextArea>div>textarea,
+.stNumberInput>div>div>input {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: var(--black) !important;
+  border-radius: 10px !important;
+}
+
+/* Tab styling */
+.stTabs [data-baseweb="tab-list"] {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-radius: 10px !important;
+  gap: 4px;
+}
+
+.stTabs [data-baseweb="tab"] {
+  color: var(--text-muted) !important;
+  border-radius: 8px !important;
+}
+
+.stTabs [aria-selected="true"] {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.2), rgba(123, 47, 247, 0.2)) !important;
+  color: var(--text) !important;
+}
+
+/* Metric containers */
+[data-testid="metric-container"] {
+  background: var(--bg-card) !important;
+  border-radius: var(--radius) !important;
+  border: 1px solid var(--border) !important;
+  padding: 0.8rem 1rem !important;
+}
+
+[data-testid="metric-container"] label {
+  color: var(--text-muted) !important;
+}
+
+[data-testid="metric-container"] [data-testid="metric-value"] {
+  color: var(--text) !important;
+}
+
+/* Dataframe */
+.stDataFrame {
+  background: transparent !important;
+}
+
+.stDataFrame th {
+  color: var(--text) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.stDataFrame td {
+  color: var(--text-muted) !important;
+}
+
+/* Alert/info boxes */
+.stAlert {
+  color: var(--text) !important;
+}
+
+.stSuccess {
+  color: var(--text) !important;
+}
+
+/* Progress */
+.stProgress>div>div>div>div {
+  background: linear-gradient(90deg, var(--cyan), var(--purple)) !important;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 255, 0.3);
+  border-radius: 999px;
+}
+
+/* Animations */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeUp 0.4s ease;
+}
+
+hr {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
