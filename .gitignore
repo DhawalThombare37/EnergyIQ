@@ -1,6 +1,9 @@
 # Sensitive Data (REQUIRED for Groq API Security)
 .env
 .env.local
+node_modules/
+dist/
+build/
 
 # Python
 __pycache__/

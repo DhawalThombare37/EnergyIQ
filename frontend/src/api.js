@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api' })
+const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || '/api' })
 
 export default api
 
@@ -50,7 +50,7 @@ export const advisorApi = {
 export const chatApi = {
   status:          () => api.get('/chat/status'),
   quickSuggestions:() => api.get('/chat/quick-suggestions'),
-  send:            (message, model='llama3.2:1b') => api.post('/chat/send', { message, model }),
+  send:            (message, model='llama-3.1-8b-instant') => api.post('/chat/send', { message, model }),
 }
 
 // ── RAG ────────────────────────────────────────────────────────
@@ -60,6 +60,6 @@ export const ragApi = {
     const fd = new FormData(); fd.append('file', file)
     return api.post('/rag/upload', fd)
   },
-  ask:   (question, model='llama3.2:1b') => api.post('/rag/ask', { question, model }),
+  ask:   (question, model='llama-3.1-8b-instant') => api.post('/rag/ask', { question, model }),
   clear: () => api.delete('/rag/clear'),
 }
