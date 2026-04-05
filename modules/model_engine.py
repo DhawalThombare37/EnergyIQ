@@ -10,10 +10,10 @@ from sklearn.preprocessing import OneHotEncoder
 from sklearn.metrics import mean_absolute_percentage_error
 import xgboost as xgb
 
-HOUSEHOLD_UNITS_PARAMS  = {'colsample_bytree': 0.7, 'learning_rate': 0.1, 'max_depth': 3, 'n_estimators': 200, 'subsample': 0.8}
-HOUSEHOLD_BILL_PARAMS   = {'colsample_bytree': 0.7, 'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 200, 'subsample': 0.7}
-INDUSTRIAL_UNITS_PARAMS = {'colsample_bytree': 0.8, 'learning_rate': 0.1, 'max_depth': 3, 'n_estimators': 100, 'subsample': 0.7}
-INDUSTRIAL_BILL_PARAMS  = {'colsample_bytree': 0.8, 'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 100, 'subsample': 0.7}
+HOUSEHOLD_UNITS_PARAMS  = {'colsample_bytree': 0.7, 'learning_rate': 0.1, 'max_depth': 3, 'n_estimators': 50, 'subsample': 0.8}
+HOUSEHOLD_BILL_PARAMS   = {'colsample_bytree': 0.7, 'learning_rate': 0.1, 'max_depth': 3, 'n_estimators': 50, 'subsample': 0.7}
+INDUSTRIAL_UNITS_PARAMS = {'colsample_bytree': 0.8, 'learning_rate': 0.1, 'max_depth': 3, 'n_estimators': 50, 'subsample': 0.7}
+INDUSTRIAL_BILL_PARAMS  = {'colsample_bytree': 0.8, 'learning_rate': 0.1, 'max_depth': 3, 'n_estimators': 50, 'subsample': 0.7}
 
 CAND_HOUSE_BASE = [
     'Global_active_power', 'Global_reactive_power', 'Voltage',

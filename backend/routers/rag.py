@@ -51,6 +51,16 @@ FAISS_INDEX_PATH = os.path.join(os.path.dirname(__file__), "../../faiss_index")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 _rag_state: dict = {"indexed": False, "filename": None, "qa_chain": None}
+_embeddings = None
+
+
+def _get_embeddings():
+    global _embeddings
+    if _embeddings is None:
+        if not RAG_AVAILABLE:
+            return None
+        _embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+    return _embeddings
 
 
 def _extract_text_from_pdf(pdf_path: str) -> str:
@@ -64,7 +74,7 @@ def _extract_text_from_pdf(pdf_path: str) -> str:
 
 
 def _build_qa_chain(model: str = "llama-3.1-8b-instant"):
-    embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+    embeddings = _get_embeddings()
     vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
     retriever = vector_store.as_retriever()
     llm = GroqLLM(model_name=model)
@@ -101,7 +111,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         # Build FAISS index
         splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         chunks = splitter.split_text(text)
-        embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+        embeddings = _get_embeddings()
         vector_store = FAISS.from_texts(chunks, embedding=embeddings)
         vector_store.save_local(FAISS_INDEX_PATH)
 
