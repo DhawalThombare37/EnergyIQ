@@ -13,10 +13,11 @@ services:
         value: 8000
 
   # 2. Vite Frontend (Static Site)
-  - type: static
+  - type: web
     name: energyiq-frontend
+    runtime: static
     buildCommand: npm run build
-    publishPath: dist
+    staticPublishPath: dist
     plan: free
     envVars:
       - key: VITE_API_BASE_URL
