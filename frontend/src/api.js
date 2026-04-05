@@ -1,6 +1,10 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || '/api' })
+let baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
+if (baseURL && baseURL.includes('onrender.com') && !baseURL.startsWith('http')) {
+  baseURL = `https://${baseURL}/api`
+}
+const api = axios.create({ baseURL })
 
 export default api
 
