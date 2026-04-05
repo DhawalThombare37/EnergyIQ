@@ -1,8 +1,9 @@
 import axios from 'axios'
 
 let baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
-if (baseURL && baseURL.includes('onrender.com') && !baseURL.startsWith('http')) {
-  baseURL = `https://${baseURL}/api`
+// If it's a raw service name (like 'energyiq-backend'), turn it into a full Render URL
+if (baseURL && !baseURL.startsWith('http') && !baseURL.startsWith('/')) {
+  baseURL = `https://${baseURL}.onrender.com/api`
 }
 const api = axios.create({ baseURL })
 
