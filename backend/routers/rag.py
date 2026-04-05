@@ -1,68 +1,43 @@
 """
-RAG Router — PDF upload, FAISS indexing, and question answering.
-Based on app2.py (PDF RAG Chatbot feature).
+RAG Router — Lightweight Keyword-based PDF search.
+Optimized for 512MB RAM environments by replacing neural embeddings with TF-IDF.
 """
 import os
 import sys
 import gc
 import shutil
+import numpy as np
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+from modules.llm_agent import query_llm
 
 router = APIRouter()
 
-# Attempt to import RAG deps (may not be installed yet)
+# Attempt to import lightweight RAG deps
 try:
     from PyPDF2 import PdfReader
-    from langchain_community.embeddings import FastEmbedEmbeddings
-    from langchain_community.vectorstores import FAISS
-    from langchain_community.llms import Ollama
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
     from langchain_text_splitters import RecursiveCharacterTextSplitter
-    from langchain.chains import RetrievalQA
-    from langchain.llms.base import LLM
-    from typing import Any, List, Mapping, Optional
-    from modules.llm_agent import query_llm
     RAG_AVAILABLE = True
 except ImportError:
     RAG_AVAILABLE = False
 
-
-class GroqLLM(LLM):
-    model_name: str = "llama-3.1-8b-instant"
-
-    @property
-    def _llm_type(self) -> str:
-        return "groq"
-
-    def _call(self, prompt: str, stop: Optional[List[str]] = None, **kwargs: Any) -> str:
-        # We ignore 'stop' for now as our query_llm is simple, 
-        # but you can pass more params if needed.
-        return query_llm(prompt, system="You are a helpful assistant answering questions based on provided PDF context.", model=self.model_name)
-
-    @property
-    def _identifying_params(self) -> Mapping[str, Any]:
-        return {"model_name": self.model_name}
-
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "../../uploaded")
-FAISS_INDEX_PATH = os.path.join(os.path.dirname(__file__), "../../faiss_index")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-_rag_state: dict = {"indexed": False, "filename": None, "qa_chain": None}
-_embeddings = None
-
-
-def _get_embeddings():
-    global _embeddings
-    if _embeddings is None:
-        if not RAG_AVAILABLE:
-            return None
-        _embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5", threads=1)
-    return _embeddings
-
+# Global state for the lightweight RAG
+# We store chunks and the TF-IDF matrix in memory (very small footprint)
+_rag_state: dict = {
+    "indexed": False,
+    "filename": None,
+    "chunks": [],
+    "vectorizer": None,
+    "tfidf_matrix": None
+}
 
 def _extract_text_from_pdf(pdf_path: str) -> str:
     reader = PdfReader(pdf_path)
@@ -73,16 +48,6 @@ def _extract_text_from_pdf(pdf_path: str) -> str:
             texts.append(str(extracted))
     return "".join(texts)
 
-
-def _build_qa_chain(model: str = "llama-3.1-8b-instant"):
-    embeddings = _get_embeddings()
-    vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
-    retriever = vector_store.as_retriever()
-    llm = GroqLLM(model_name=model)
-    qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, chain_type="stuff")
-    return qa_chain
-
-
 @router.get("/status")
 def rag_status():
     return {
@@ -91,13 +56,13 @@ def rag_status():
         "filename": _rag_state["filename"],
     }
 
-
 @router.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
     if not RAG_AVAILABLE:
-        raise HTTPException(status_code=503, detail="RAG dependencies not installed. Run: pip install PyPDF2 langchain langchain-community faiss-cpu fastembed")
+        raise HTTPException(status_code=503, detail="RAG dependencies missing.")
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
+    
     try:
         pdf_path = os.path.join(UPLOAD_DIR, file.filename)
         content = await file.read()
@@ -109,54 +74,69 @@ async def upload_pdf(file: UploadFile = File(...)):
         if not text.strip():
             raise HTTPException(status_code=400, detail="Could not extract any text from this PDF.")
 
-        # Build FAISS index
-        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        # Split into chunks
+        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
         chunks = splitter.split_text(text)
-        embeddings = _get_embeddings()
-        vector_store = FAISS.from_texts(chunks, embedding=embeddings)
-        vector_store.save_local(FAISS_INDEX_PATH)
+        
+        # Build Lightweight TF-IDF Index
+        vectorizer = TfidfVectorizer(stop_words='english')
+        tfidf_matrix = vectorizer.fit_transform(chunks)
 
-        # Build QA chain
-        _rag_state["qa_chain"] = _build_qa_chain()
+        # Update state
+        _rag_state["chunks"] = chunks
+        _rag_state["vectorizer"] = vectorizer
+        _rag_state["tfidf_matrix"] = tfidf_matrix
         _rag_state["indexed"] = True
         _rag_state["filename"] = file.filename
 
         return {"success": True, "filename": file.filename, "chunks": len(chunks)}
-    except HTTPException:
-        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
         gc.collect()
 
-
 class AskRequest(BaseModel):
     question: str
     model: Optional[str] = "llama-3.1-8b-instant"
 
-
 @router.post("/ask")
 def ask_question(req: AskRequest):
     if not RAG_AVAILABLE:
-        raise HTTPException(status_code=503, detail="RAG dependencies not installed.")
-    if not _rag_state["indexed"]:
+        raise HTTPException(status_code=503, detail="RAG dependencies missing.")
+    if not _rag_state["indexed"] or not _rag_state["chunks"]:
         raise HTTPException(status_code=400, detail="No PDF indexed. Upload a PDF first.")
+    
     try:
-        if _rag_state["qa_chain"] is None:
-            _rag_state["qa_chain"] = _build_qa_chain(req.model or "llama-3.1-8b-instant")
-        answer = _rag_state["qa_chain"].run(req.question)
+        # 1. Retrieve relevant chunks using TF-IDF similarity
+        query_vec = _rag_state["vectorizer"].transform([req.question])
+        similarities = cosine_similarity(query_vec, _rag_state["tfidf_matrix"]).flatten()
+        
+        # Get top 3 most relevant chunks
+        top_indices = similarities.argsort()[-3:][::-1]
+        relevant_chunks = [_rag_state["chunks"][i] for i in top_indices if similarities[i] > 0]
+        
+        # If no keywords match, fall back to the first two chunks as general context
+        if not relevant_chunks:
+            relevant_chunks = _rag_state["chunks"][:2]
+
+        context = "\n---\n".join(relevant_chunks)
+        
+        # 2. Call Groq with the context
+        prompt = f"Context from PDF:\n{context}\n\nQuestion: {req.question}\n\nAnswer based STRICTLY on the context above. If not found, say you don't know."
+        answer = query_llm(prompt, system="You are an expert energy advisor.", model=req.model)
+        
         return {"answer": answer, "filename": _rag_state["filename"]}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
         gc.collect()
 
-
 @router.delete("/clear")
 def clear_index():
     _rag_state["indexed"] = False
     _rag_state["filename"] = None
-    _rag_state["qa_chain"] = None
-    if os.path.exists(FAISS_INDEX_PATH):
-        shutil.rmtree(FAISS_INDEX_PATH, ignore_errors=True)
+    _rag_state["chunks"] = []
+    _rag_state["vectorizer"] = None
+    _rag_state["tfidf_matrix"] = None
+    gc.collect()
     return {"success": True}
