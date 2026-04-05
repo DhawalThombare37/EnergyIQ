@@ -25,5 +25,5 @@ services:
           name: energyiq-backend
           type: web
           property: host
-        generateValue: https://${energyiq_backend_host}
+        generateValue: https://${energyiq_backend_host}/api
     rootDir: frontend

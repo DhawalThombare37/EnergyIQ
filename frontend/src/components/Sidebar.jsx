@@ -32,7 +32,8 @@ export default function Sidebar({ activePage, onNavigate }) {
       }
       setDataLoaded(true)
       setDataInfo({ records: res.data.records, days: res.data.days })
-      setSuccess(`✓ ${res.data.records.toLocaleString()} records · ${res.data.days} days loaded`)
+      const recordCount = res.data.records ?? 0
+      setSuccess(`✓ ${recordCount.toLocaleString()} records · ${res.data.days} days loaded`)
     } catch (e) {
       setError(e.response?.data?.detail || e.message)
     } finally {
